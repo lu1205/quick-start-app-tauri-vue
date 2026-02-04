@@ -1,6 +1,7 @@
 <script setup>
-import { ref, reactive, computed } from "vue";
+import { ref, reactive, computed, onMounted } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 
 // 软件列表数据
 const softwareList = ref([]);
@@ -185,6 +186,124 @@ async function openSoftware(software) {
     alert("无法打开软件，请检查路径是否正确");
   }
 }
+
+// 处理拖拽进入事件
+function handleDragEnter(event) {
+  console.log("handleDragEnter called");
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+// 处理拖拽离开事件
+function handleDragLeave(event) {
+  console.log("handleDragLeave called");
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+
+
+// 处理拖拽添加应用
+function handleDrop(event) {
+  console.log("handleDrop called");
+  event.preventDefault();
+  event.stopPropagation();
+  
+  // 尝试获取拖拽的文件路径
+  try {
+    // 对于Tauri应用，我们需要使用不同的方法获取文件路径
+    // 这里我们假设event.dataTransfer.files包含了文件信息
+    const files = event.dataTransfer.files;
+    console.log("Number of files dropped:", files.length);
+    
+    if (files.length > 0) {
+      const file = files[0];
+      console.log("File name:", file.name);
+      console.log("File path:", file.path);
+      
+      // 简单测试：添加一个软件到列表
+      const newSoftware = {
+        id: softwareList.value.length + 1,
+        name: file.name || "Unknown App",
+        path: file.path || "C:\\unknown\\app.exe",
+        icon: "https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=software%20icon&image_size=square"
+      };
+      softwareList.value.push(newSoftware);
+      console.log("Software added successfully!");
+    }
+  } catch (error) {
+    console.error("Error in handleDrop:", error);
+  }
+}
+
+// 监听Tauri拖拽事件
+onMounted(() => {
+  // 监听Tauri的拖拽事件
+  listen("tauri://drag-drop", async (event) => {
+    console.log("Tauri drag-drop event:", event);
+    
+    // 尝试从事件中获取文件路径
+    try {
+      // 在Tauri 2.x中，拖拽事件的payload可能包含文件信息
+      const payload = event.payload;
+      console.log("Payload:", payload);
+      
+      // 从paths数组中获取文件路径
+      if (payload && payload.paths && payload.paths.length > 0) {
+        for (const path of payload.paths) {
+          console.log("File path from Tauri event:", path);
+          
+          // 检查文件类型
+          if (path && (path.endsWith('.exe') || path.endsWith('.lnk'))) {
+            // 从路径中提取应用名称
+            const pathParts = path.split("\\");
+            const fileName = pathParts[pathParts.length - 1];
+            const softwareName = fileName.replace(/\.(exe|lnk)$/i, "");
+            
+            // 生成新ID
+            const newId = softwareList.value.length > 0 
+              ? Math.max(...softwareList.value.map(s => s.id)) + 1 
+              : 1;
+            
+            // 调用get_file_icon命令获取文件图标
+            let iconPath = `https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${encodeURIComponent(softwareName)}%20software%20icon%20colorful%20modern%20design&image_size=square`;
+            try {
+              // 使用window.__TAURI_INTERNALS__.invoke来调用Tauri命令
+              console.log("Calling get_file_icon with path:", path);
+              const result = await window.__TAURI_INTERNALS__.invoke("get_file_icon", { path: path });
+              console.log("Icon result:", result);
+              if (result && result !== "") {
+                iconPath = result;
+              } else {
+                console.log("Empty icon result, using fallback");
+                // 如果返回空字符串，使用在线API生成图标作为备选
+                iconPath = `https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${encodeURIComponent(softwareName)}%20software%20icon%20colorful%20modern%20design&image_size=square`;
+              }
+            } catch (iconError) {
+              console.error("Error getting file icon:", iconError);
+              // 出错时使用在线API生成图标作为备选
+              iconPath = `https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${encodeURIComponent(softwareName)}%20software%20icon%20colorful%20modern%20design&image_size=square`;
+            }
+            
+            // 添加到软件列表
+            const newSoftware = {
+              id: newId,
+              name: softwareName,
+              path: path,
+              icon: iconPath
+            };
+            softwareList.value.push(newSoftware);
+            console.log("Software added via Tauri drag-drop event!");
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error handling Tauri drag-drop event:", error);
+    }
+  });
+  
+  console.log("Tauri drag-drop event listener added");
+});
 </script>
 
 <template>
@@ -205,7 +324,25 @@ async function openSoftware(software) {
     </header>
 
     <!-- 软件列表 -->
-    <main class="software-list">
+    <main 
+      class="software-list"
+      @dragover.prevent
+      @drop="handleDrop"
+      @dragenter="handleDragEnter"
+      @dragleave="handleDragLeave"
+    >
+      <!-- 空状态提示 -->
+      <div v-if="filteredSoftwareList.length === 0" class="empty-state">
+        <div class="empty-state-icon">📦</div>
+        <h3>暂无软件</h3>
+        <p>您可以通过以下方式添加软件：</p>
+        <ul>
+          <li>点击"添加软件"按钮</li>
+          <li>将应用程序拖拽到此处</li>
+        </ul>
+      </div>
+      
+      <!-- 软件卡片 -->
       <div 
         v-for="software in filteredSoftwareList" 
         :key="software.id"
@@ -546,6 +683,56 @@ async function openSoftware(software) {
   background-color: #f5f5f5;
 }
 
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 60px 20px;
+  color: #666;
+  width: 100%;
+  min-height: 400px;
+}
+
+.empty-state-icon {
+  font-size: 64px;
+  margin-bottom: 20px;
+}
+
+.empty-state h3 {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #333;
+}
+
+.empty-state p {
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.empty-state ul {
+  list-style: none;
+  text-align: left;
+  margin-top: 20px;
+}
+
+.empty-state li {
+  margin-bottom: 8px;
+  font-size: 14px;
+  padding-left: 20px;
+  position: relative;
+}
+
+.empty-state li::before {
+  content: "•";
+  color: #396cd8;
+  font-weight: bold;
+  position: absolute;
+  left: 0;
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
   .header {
@@ -564,6 +751,19 @@ async function openSoftware(software) {
   
   .software-list {
     justify-content: center;
+  }
+  
+  .empty-state {
+    padding: 40px 15px;
+    min-height: 300px;
+  }
+  
+  .empty-state-icon {
+    font-size: 48px;
+  }
+  
+  .empty-state h3 {
+    font-size: 18px;
   }
 }
 </style>
