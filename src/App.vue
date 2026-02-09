@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from "vue";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, confirm } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { writeTextFile, readTextFile, exists, mkdir } from "@tauri-apps/plugin-fs";
 import { appDataDir } from "@tauri-apps/api/path";
@@ -145,14 +145,27 @@ function editSoftware() {
 // 删除软件
 async function deleteSoftware() {
   if (selectedSoftware.value) {
-    softwareList.value = softwareList.value.filter(
-      software => software.id !== selectedSoftware.value.id
+    // 显示确认对话框
+    const confirmed = await confirm(
+      `确定要删除软件 "${selectedSoftware.value.name}" 吗？`,
+      {
+        title: "确认删除",
+        kind: "warning"
+      }
     );
     
-    // 保存软件列表
-    await saveSoftwareList();
-    
-    closeContextMenu();
+    if (confirmed) {
+      // 执行删除操作
+      softwareList.value = softwareList.value.filter(
+        software => software.id !== selectedSoftware.value.id
+      );
+      
+      // 保存软件列表
+      await saveSoftwareList();
+      
+      // 关闭右键菜单
+      closeContextMenu();
+    }
   }
 }
 
@@ -688,6 +701,7 @@ watch(softwareList, async () => {
         top: contextMenuPosition.y + 'px'
       }"
       @click.stop
+      @mouseleave="closeContextMenu"
     >
       <div class="context-menu-item" @click="editSoftware">编辑</div>
       <div class="context-menu-item" @click="deleteSoftware">删除</div>
