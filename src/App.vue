@@ -52,8 +52,46 @@ function closeAddModal() {
 async function saveSoftware() {
   if (newSoftware.name && newSoftware.path) {
     // 检查应用是否已存在
-    const existingSoftware = softwareList.value.find(software => software.path === newSoftware.path);
-    if (existingSoftware) {
+    let isExisting = false;
+    
+    // 获取当前文件的实际路径（如果是lnk文件，获取目标路径）
+    let currentPath = newSoftware.path;
+    if (currentPath.endsWith('.lnk')) {
+      try {
+        // 尝试获取lnk文件的目标路径
+        const targetPath = await window.__TAURI_INTERNALS__.invoke("get_shortcut_target", { path: currentPath });
+        if (targetPath) {
+          currentPath = targetPath;
+        }
+      } catch (error) {
+        console.error("Error getting shortcut target:", error);
+      }
+    }
+    
+    // 检查是否存在相同路径或相同目标路径的应用
+    for (const software of softwareList.value) {
+      let softwarePath = software.path;
+      
+      // 如果软件路径是lnk文件，获取其目标路径
+      if (softwarePath.endsWith('.lnk')) {
+        try {
+          const targetPath = await window.__TAURI_INTERNALS__.invoke("get_shortcut_target", { path: softwarePath });
+          if (targetPath) {
+            softwarePath = targetPath;
+          }
+        } catch (error) {
+          console.error("Error getting shortcut target:", error);
+        }
+      }
+      
+      // 比较实际路径
+      if (softwarePath === currentPath) {
+        isExisting = true;
+        break;
+      }
+    }
+    
+    if (isExisting) {
       alert("该应用已存在，不能重复添加");
       return;
     }
@@ -220,7 +258,7 @@ function handleDragLeave(event) {
 
 
 // 处理拖拽添加应用
-function handleDrop(event) {
+async function handleDrop(event) {
   console.log("handleDrop called");
   event.preventDefault();
   event.stopPropagation();
@@ -237,15 +275,97 @@ function handleDrop(event) {
       console.log("File name:", file.name);
       console.log("File path:", file.path);
       
-      // 简单测试：添加一个软件到列表
-      const newSoftware = {
-        id: softwareList.value.length + 1,
-        name: file.name || "Unknown App",
-        path: file.path || "C:\\unknown\\app.exe",
-        icon: "https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=software%20icon&image_size=square"
-      };
-      softwareList.value.push(newSoftware);
-      console.log("Software added successfully!");
+      // 检查文件类型
+      if (file.path && (file.path.endsWith('.exe') || file.path.endsWith('.lnk'))) {
+        // 从路径中提取应用名称
+        const pathParts = file.path.split("\\");
+        const fileName = pathParts[pathParts.length - 1];
+        const softwareName = fileName.replace(/\.(exe|lnk)$/i, "");
+        
+        // 生成新ID
+        const newId = softwareList.value.length > 0 
+          ? Math.max(...softwareList.value.map(s => s.id)) + 1 
+          : 1;
+        
+        // 调用get_file_icon命令获取文件图标
+        let iconPath = `https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${encodeURIComponent(softwareName)}%20software%20icon%20colorful%20modern%20design&image_size=square`;
+        try {
+          // 使用window.__TAURI_INTERNALS__.invoke来调用Tauri命令
+          console.log("Calling get_file_icon with path:", file.path);
+          const result = await window.__TAURI_INTERNALS__.invoke("get_file_icon", { path: file.path });
+          console.log("Icon result:", result);
+          if (result && result !== "") {
+            iconPath = result;
+          } else {
+            console.log("Empty icon result, using fallback");
+            // 如果返回空字符串，使用在线API生成图标作为备选
+            iconPath = `https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${encodeURIComponent(softwareName)}%20software%20icon%20colorful%20modern%20design&image_size=square`;
+          }
+        } catch (iconError) {
+          console.error("Error getting file icon:", iconError);
+          // 出错时使用在线API生成图标作为备选
+          iconPath = `https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${encodeURIComponent(softwareName)}%20software%20icon%20colorful%20modern%20design&image_size=square`;
+        }
+        
+        // 检查应用是否已存在
+        let isExisting = false;
+        
+        // 获取当前文件的实际路径（如果是lnk文件，获取目标路径）
+        let currentPath = file.path;
+        if (currentPath.endsWith('.lnk')) {
+          try {
+            // 尝试获取lnk文件的目标路径
+            const targetPath = await window.__TAURI_INTERNALS__.invoke("get_shortcut_target", { path: currentPath });
+            if (targetPath) {
+              currentPath = targetPath;
+            }
+          } catch (error) {
+            console.error("Error getting shortcut target:", error);
+          }
+        }
+        
+        // 检查是否存在相同路径或相同目标路径的应用
+        for (const software of softwareList.value) {
+          let softwarePath = software.path;
+          
+          // 如果软件路径是lnk文件，获取其目标路径
+          if (softwarePath.endsWith('.lnk')) {
+            try {
+              const targetPath = await window.__TAURI_INTERNALS__.invoke("get_shortcut_target", { path: softwarePath });
+              if (targetPath) {
+                softwarePath = targetPath;
+              }
+            } catch (error) {
+              console.error("Error getting shortcut target:", error);
+            }
+          }
+          
+          // 比较实际路径
+          if (softwarePath === currentPath) {
+            isExisting = true;
+            break;
+          }
+        }
+        
+        if (isExisting) {
+          console.log("该应用已存在，不能重复添加");
+          alert("该应用已存在，不能重复添加");
+          return;
+        }
+        
+        // 添加到软件列表
+        const newSoftware = {
+          id: newId,
+          name: softwareName,
+          path: file.path,
+          icon: iconPath
+        };
+        softwareList.value.push(newSoftware);
+        console.log("Software added via handleDrop event!");
+        
+        // 保存软件列表
+        await saveSoftwareList();
+      }
     }
   } catch (error) {
     console.error("Error in handleDrop:", error);
@@ -392,9 +512,48 @@ onMounted(async () => {
             }
             
             // 检查应用是否已存在
-            const existingSoftware = softwareList.value.find(software => software.path === path);
-            if (existingSoftware) {
+            let isExisting = false;
+            
+            // 获取当前文件的实际路径（如果是lnk文件，获取目标路径）
+            let currentPath = path;
+            if (currentPath.endsWith('.lnk')) {
+              try {
+                // 尝试获取lnk文件的目标路径
+                const targetPath = await window.__TAURI_INTERNALS__.invoke("get_shortcut_target", { path: currentPath });
+                if (targetPath) {
+                  currentPath = targetPath;
+                }
+              } catch (error) {
+                console.error("Error getting shortcut target:", error);
+              }
+            }
+            
+            // 检查是否存在相同路径或相同目标路径的应用
+            for (const software of softwareList.value) {
+              let softwarePath = software.path;
+              
+              // 如果软件路径是lnk文件，获取其目标路径
+              if (softwarePath.endsWith('.lnk')) {
+                try {
+                  const targetPath = await window.__TAURI_INTERNALS__.invoke("get_shortcut_target", { path: softwarePath });
+                  if (targetPath) {
+                    softwarePath = targetPath;
+                  }
+                } catch (error) {
+                  console.error("Error getting shortcut target:", error);
+                }
+              }
+              
+              // 比较实际路径
+              if (softwarePath === currentPath) {
+                isExisting = true;
+                break;
+              }
+            }
+            
+            if (isExisting) {
               console.log("该应用已存在，不能重复添加");
+              alert("该应用已存在，不能重复添加");
               return;
             }
             

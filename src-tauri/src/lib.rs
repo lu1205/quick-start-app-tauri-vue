@@ -12,6 +12,11 @@ fn get_file_icon(path: &str) -> String {
 }
 
 #[tauri::command]
+fn get_shortcut_target(path: &str) -> Option<String> {
+    resolve_shortcut(path)
+}
+
+#[tauri::command]
 fn open_software(path: &str) -> Result<(), String> {
     use winapi::um::shellapi::{ShellExecuteW};
     use winapi::um::winuser::{SW_SHOW};
@@ -112,7 +117,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![greet, get_file_icon, open_software])
+        .invoke_handler(tauri::generate_handler![greet, get_file_icon, open_software, get_shortcut_target])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
