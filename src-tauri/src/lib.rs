@@ -50,40 +50,61 @@ fn open_software(path: &str) -> Result<(), String> {
 
 // 基于文件类型生成图标的辅助函数
 fn generate_icon_from_file_type(path: &str) -> String {
+    // 检查是否为.lnk文件
+    let path_str = path.to_string();
+    if path_str.ends_with(".lnk") {
+        // 尝试解析.lnk文件，获取目标路径
+        if let Some(target_path) = resolve_shortcut(path) {
+            // 使用目标路径获取图标
+            match get_icon_base64_by_path(&target_path) {
+                Ok(icon) => {
+                    return format!("data:image/png;base64,{}", icon);
+                }
+                Err(_) => {
+                    // 如果获取目标文件图标失败，尝试使用原始路径
+                }
+            }
+        }
+    }
+    
     // 尝试使用windows_icons获取图标
     match get_icon_base64_by_path(path) {
         Ok(icon) => {
             format!("data:image/png;base64,{}", icon)
         }
         Err(_) => {
-            // 注释掉备选方案代码
-            // // 出错时使用基于文件类型的图标作为备选
-            // let file_name = path.split('\\').last().unwrap_or("unknown");
-            // let file_ext = file_name.split('.').last().unwrap_or("").to_lowercase();
-            // 
-            // // 根据文件扩展名生成不同的图标提示词
-            // let icon_prompt = match file_ext.as_str() {
-            //     "exe" => "executable file icon windows application",
-            //     "lnk" => "shortcut file icon link arrow",
-            //     "pdf" => "PDF document file icon red",
-            //     "doc" | "docx" => "Word document file icon blue",
-            //     "xls" | "xlsx" => "Excel spreadsheet file icon green",
-            //     "ppt" | "pptx" => "PowerPoint presentation file icon orange",
-            //     "txt" => "text file icon white paper",
-            //     "jpg" | "jpeg" | "png" | "gif" => "image file icon colorful picture",
-            //     "mp3" | "wav" | "flac" => "audio file icon music note",
-            //     "mp4" | "avi" | "mkv" => "video file icon movie clapper",
-            //     "zip" | "rar" | "7z" => "compressed file icon zip folder",
-            //     _ => "generic file icon document",
-            // };
-            // 
-            // // 生成基于文件类型的图标URL
-            // format!("https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt={}%20colorful%20modern%20design&image_size=square", urlencoding::encode(icon_prompt))
-            
             // 返回空字符串
             "".to_string()
         }
     }
+}
+
+// 解析Windows快捷方式(.lnk文件)，返回目标路径
+#[cfg(windows)]
+fn resolve_shortcut(lnk_path: &str) -> Option<String> {
+    use std::process::Command;
+    
+    // 使用PowerShell命令解析lnk文件
+    let output = Command::new("powershell")
+        .arg("-Command")
+        .arg(format!("(New-Object -COM WScript.Shell).CreateShortcut('{}').TargetPath", lnk_path))
+        .output()
+        .ok()?;
+    
+    if output.status.success() {
+        let target_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !target_path.is_empty() {
+            return Some(target_path);
+        }
+    }
+    
+    None
+}
+
+// 非Windows平台的默认实现
+#[cfg(not(windows))]
+fn resolve_shortcut(_lnk_path: &str) -> Option<String> {
+    None
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
