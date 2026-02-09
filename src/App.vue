@@ -1,7 +1,9 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from "vue";
+import { ref, reactive, computed, onMounted, watch } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
+import { writeTextFile, readTextFile, exists, mkdir } from "@tauri-apps/plugin-fs";
+import { appDataDir } from "@tauri-apps/api/path";
 
 // 软件列表数据
 const softwareList = ref([]);
@@ -47,8 +49,15 @@ function closeAddModal() {
 }
 
 // 保存新软件
-function saveSoftware() {
+async function saveSoftware() {
   if (newSoftware.name && newSoftware.path) {
+    // 检查应用是否已存在
+    const existingSoftware = softwareList.value.find(software => software.path === newSoftware.path);
+    if (existingSoftware) {
+      alert("该应用已存在，不能重复添加");
+      return;
+    }
+    
     const newId = softwareList.value.length > 0 
       ? Math.max(...softwareList.value.map(s => s.id)) + 1 
       : 1;
@@ -59,6 +68,9 @@ function saveSoftware() {
       path: newSoftware.path,
       icon: newSoftware.icon
     });
+    
+    // 保存软件列表
+    await saveSoftwareList();
     
     closeAddModal();
   }
@@ -93,11 +105,15 @@ function editSoftware() {
 }
 
 // 删除软件
-function deleteSoftware() {
+async function deleteSoftware() {
   if (selectedSoftware.value) {
     softwareList.value = softwareList.value.filter(
       software => software.id !== selectedSoftware.value.id
     );
+    
+    // 保存软件列表
+    await saveSoftwareList();
+    
     closeContextMenu();
   }
 }
@@ -112,7 +128,7 @@ async function selectFilePath() {
       filters: [
         {
           name: "应用程序",
-          extensions: ["exe", "lnk", "*"]
+          extensions: ["exe", "lnk"]
         }
       ]
     });
@@ -236,8 +252,98 @@ function handleDrop(event) {
   }
 }
 
+// 保存软件列表到本地文件
+async function saveSoftwareList() {
+  try {
+    // 尝试使用不同的方法获取应用数据目录
+    let dataDir;
+    try {
+      dataDir = await appDataDir();
+    } catch (pathError) {
+      console.error("Error getting app data directory:", pathError);
+      // 使用当前目录作为备选
+      dataDir = ".";
+    }
+    
+    // 检查目录是否存在，不存在则创建
+    try {
+      const dirExists = await exists(dataDir);
+      if (!dirExists) {
+        console.log("Creating app data directory:", dataDir);
+        await mkdir(dataDir, { recursive: true });
+      }
+    } catch (dirError) {
+      console.error("Error checking/creating directory:", dirError);
+      // 出错时继续执行，使用当前目录作为备选
+      dataDir = ".";
+    }
+    
+    // 添加正确的路径分隔符
+    const filePath = `${dataDir}${dataDir.endsWith('\\') ? '' : '\\'}software-list.json`;
+    const data = JSON.stringify(softwareList.value, null, 2);
+    
+    // 尝试保存文件
+    await writeTextFile(filePath, data);
+    console.log("Software list saved successfully:", filePath);
+  } catch (error) {
+    console.error("Error saving software list:", error);
+    // 出错时，我们仍然保持内存中的数据，只是无法持久化
+    console.log("Continuing with in-memory software list");
+  }
+}
+
+// 从本地文件加载软件列表
+async function loadSoftwareList() {
+  try {
+    // 尝试使用不同的方法获取应用数据目录
+    let dataDir;
+    try {
+      dataDir = await appDataDir();
+    } catch (pathError) {
+      console.error("Error getting app data directory:", pathError);
+      // 使用当前目录作为备选
+      dataDir = ".";
+    }
+    
+    // 检查目录是否存在
+    try {
+      const dirExists = await exists(dataDir);
+      if (!dirExists) {
+        console.log("App data directory does not exist:", dataDir);
+        softwareList.value = [];
+        return;
+      }
+    } catch (dirError) {
+      console.error("Error checking directory:", dirError);
+      // 出错时继续执行，使用当前目录作为备选
+      dataDir = ".";
+    }
+    
+    // 添加正确的路径分隔符
+    const filePath = `${dataDir}${dataDir.endsWith('\\') ? '' : '\\'}software-list.json`;
+    
+    // 尝试直接读取文件，不使用exists检查
+    try {
+      const data = await readTextFile(filePath);
+      const savedList = JSON.parse(data);
+      softwareList.value = savedList;
+      console.log("Software list loaded successfully:", savedList);
+    } catch (readError) {
+      console.error("Error reading software list file:", readError);
+      console.log("No saved software list found, starting with empty list");
+      softwareList.value = [];
+    }
+  } catch (error) {
+    console.error("Error loading software list:", error);
+    softwareList.value = [];
+  }
+}
+
 // 监听Tauri拖拽事件
-onMounted(() => {
+onMounted(async () => {
+  // 加载软件列表
+  await loadSoftwareList();
+  
   // 监听Tauri的拖拽事件
   listen("tauri://drag-drop", async (event) => {
     console.log("Tauri drag-drop event:", event);
@@ -285,6 +391,13 @@ onMounted(() => {
               iconPath = `https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${encodeURIComponent(softwareName)}%20software%20icon%20colorful%20modern%20design&image_size=square`;
             }
             
+            // 检查应用是否已存在
+            const existingSoftware = softwareList.value.find(software => software.path === path);
+            if (existingSoftware) {
+              console.log("该应用已存在，不能重复添加");
+              return;
+            }
+            
             // 添加到软件列表
             const newSoftware = {
               id: newId,
@@ -294,6 +407,9 @@ onMounted(() => {
             };
             softwareList.value.push(newSoftware);
             console.log("Software added via Tauri drag-drop event!");
+            
+            // 保存软件列表
+            await saveSoftwareList();
           }
         }
       }
@@ -304,6 +420,11 @@ onMounted(() => {
   
   console.log("Tauri drag-drop event listener added");
 });
+
+// 监听软件列表变化，自动保存
+watch(softwareList, async () => {
+  await saveSoftwareList();
+}, { deep: true });
 </script>
 
 <template>
