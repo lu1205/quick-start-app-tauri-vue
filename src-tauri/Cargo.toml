@@ -29,4 +29,4 @@ base64 = "0.21"
 windows-icons = "0.2.1"
 
 [target.'cfg(windows)'.dependencies]
-winapi = "0.3"
+winapi = { version = "0.3", features = ["combaseapi", "shobjidl_core", "oleauto", "objbase", "winerror"] }

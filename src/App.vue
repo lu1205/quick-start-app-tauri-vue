@@ -822,7 +822,10 @@ watch(softwareList, async () => {
   font-size: 14px;
   color: #333;
   text-align: center;
-  word-break: break-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
 }
 
 /* 弹窗样式 */

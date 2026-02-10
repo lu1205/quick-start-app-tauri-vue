@@ -89,8 +89,10 @@ fn generate_icon_from_file_type(path: &str) -> String {
 fn resolve_shortcut(lnk_path: &str) -> Option<String> {
     use std::process::Command;
     
-    // 使用PowerShell命令解析lnk文件
+    // 使用PowerShell命令解析lnk文件，添加-WindowStyle Hidden参数隐藏窗口
     let output = Command::new("powershell")
+        .arg("-WindowStyle")
+        .arg("Hidden")
         .arg("-Command")
         .arg(format!("(New-Object -COM WScript.Shell).CreateShortcut('{}').TargetPath", lnk_path))
         .output()
